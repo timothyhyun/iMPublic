@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, HostListener, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, Component, HostListener, OnInit, DoCheck } from '@angular/core';
 import { Validators } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { ChangeMakerFacade, PoiCmStoreModel } from '@involvemint/client/cm/data-access';
@@ -88,7 +88,6 @@ export class PoiComponent extends StatefulComponent<State> implements OnInit, Co
       this.back();
       return;
     }
-
     this.effect(() =>
       this.cf.poi.selectors.getPoi(id).pipe(
         tap(({ poi, loaded }) => {
@@ -103,12 +102,17 @@ export class PoiComponent extends StatefulComponent<State> implements OnInit, Co
         }),
         filter(({ poi }) => !!poi),
         tapOnce(({ poi }) => {
+          console.log("creating questions")
           poi?.enrollment.project.questions.forEach((_, i) => {
             this.questions.insert(
               i,
               new FormControl(poi?.answers[i]?.answer || '', (e) => Validators.required(e))
             );
           });
+        }),
+        tap(() => {
+          this.loadfromLocalStorage()
+
         }),
         switchMap(({ poi }) => {
           if (!poi || !poi.dateStarted) {
@@ -169,9 +173,66 @@ export class PoiComponent extends StatefulComponent<State> implements OnInit, Co
         })
       )
     );
+
+    this.effect(() => 
+        timer(15000,10000).pipe(
+          tap(() => {
+            this.saveToLocalStorage()
+          })
+        )
+    );
+  }
+
+
+  saveToLocalStorage() {
+    console.log("saving")
+    localStorage.setItem('poiFormData', JSON.stringify(this.questions.value));
+  }
+
+  saveImagesToLocalStorage() {
+    console.log("saving images")
+    localStorage.setItem('poiImageData', JSON.stringify(this.state.imgLocalUrls))
+  }
+
+  clearLocalStorage() {
+    console.log("clearing")
+    localStorage.removeItem('poiFormData');
+    localStorage.removeItem('poiImageData');
+  }
+
+  loadfromLocalStorage() {
+    console.log("loading")
+    const form = localStorage.getItem('poiFormData')
+    const formData = JSON.parse(form || '{}');
+    console.log(formData.length)
+    console.log(form)
+    if (form) {
+      console.log("got question here")
+      console.log(this.questions.value.length)
+      this.questions.setValue(formData);
+    }
+    const imageForm = localStorage.getItem('poiImageData')
+    const imageData = JSON.parse(imageForm || '{}');
+    console.log(imageData)
+    const fileList = []
+    if (imageForm) {
+      for (let i = 0; i < imageData.length; i++) {
+        var base64Parts = imageData[i].split(",");
+        var fileFormat = base64Parts[0].split(";")[1];
+        var fileContent = base64Parts[1];
+        var file = new File([fileContent], "upload".concat(String(i)), {type: fileFormat});
+        fileList.push(file)
+        console.log(fileList)
+      }
+      this.updateState({
+        files: fileList,
+        imgLocalUrls: imageData,
+      });
+    }
   }
 
   back() {
+    this.clearLocalStorage();
     return this.route.back(() => this.route.to.cm.pois.ROOT({ animation: 'back' }));
   }
 
@@ -207,6 +268,7 @@ export class PoiComponent extends StatefulComponent<State> implements OnInit, Co
         const imgUrls = this.state.imgLocalUrls;
         imgUrls[i] = reader.result as string;
         this.updateState({ imgLocalUrls: imgUrls });
+        this.saveImagesToLocalStorage();
       };
     }
   }
@@ -241,6 +303,7 @@ export class PoiComponent extends StatefulComponent<State> implements OnInit, Co
   }
 
   submit(poi: PoiCmStoreModel) {
+    this.clearLocalStorage();
     this.cf.poi.dispatchers.submit(
       poi,
       this.state.files,
